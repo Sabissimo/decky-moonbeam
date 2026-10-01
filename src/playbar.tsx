@@ -56,6 +56,8 @@ let steamButtonType: any = null;
 let steamSelectorIcon: ReactNode = null;
 // Class of Moonbeam's own ▼, which carries Steam's selector class too (for Steam's styling)
 const OWN_SELECTOR_CLASS = "moonbeam-selector";
+// On the Play button's row while Moonbeam added Steam's ▼ class to it
+const MARKED_ATTRIBUTE = "data-moonbeam-selector";
 
 function refreshPlayBar(): void {
   try {
@@ -78,12 +80,38 @@ function streamingAvailable(): boolean {
   return playBarInstance?.props?.bShowStreamingSelector === true;
 }
 
-/** Renders the play bar again if Steam's ▼ came or went since the play button was rendered. */
+/**
+ * Steam marks the Play button's row with a class while it shows its ▼ (its CSS lays out and colours
+ * the ▼ by it). Moonbeam's own ▼ gets the same: added to the row while it is there, removed after.
+ */
+function markSelectorRow(): void {
+  const rowClass = appActionButtonClasses.ShowStreaming;
+  const containerClass = appActionButtonClasses.PlayButtonContainer;
+  if (pageRoot === null || !rowClass || !containerClass) {
+    return;
+  }
+  for (const row of pageRoot.querySelectorAll(`.${CSS.escape(containerClass)}`)) {
+    const hasOwn = row.querySelector(`.${OWN_SELECTOR_CLASS}`) !== null;
+    const hasSteams = row.querySelector(`.${CSS.escape(appActionButtonClasses.StreamingSelector)}:not(.${OWN_SELECTOR_CLASS})`) !== null;
+    if (hasOwn) {
+      row.classList.add(rowClass);
+    } else if (!hasSteams && row.classList.contains(rowClass) && row.hasAttribute(MARKED_ATTRIBUTE)) {
+      row.classList.remove(rowClass);
+    }
+    row.toggleAttribute(MARKED_ATTRIBUTE, hasOwn);
+  }
+}
+
+/** After the play button rendered: re-render if Steam's ▼ came or went, and mark the row for Moonbeam's ▼. */
 function recheckSteamSelector(renderedWith: boolean): void {
   setTimeout(() => {
-    if (currentGame !== null && streamingAvailable() !== renderedWith) {
+    if (currentGame === null) {
+      return;
+    }
+    if (streamingAvailable() !== renderedWith) {
       refreshPlayBar();
     }
+    markSelectorRow();
   }, 0);
 }
 
@@ -153,6 +181,8 @@ async function updateOnlineHosts(): Promise<void> {
     if (changed) {
       refreshPlayBar();
     }
+    // Moonbeam's ▼ may have gone (PC offline) without the play button changing
+    setTimeout(markSelectorRow, 0);
   } catch (error) {
     console.error("Moonbeam: online check failed", error);
   }

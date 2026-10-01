@@ -109,6 +109,7 @@ export async function dumpGamePage(anchor: Element | null, appId: number, appNam
   const sections = [
     `Moonbeam game page snapshot for ${appId} (${appName}), ${new Date().toISOString()}`,
     `Steam classes: PlayButton=${appActionButtonClasses.PlayButton} StreamingSelector=${appActionButtonClasses.StreamingSelector} ` +
+    `ShowStreaming=${appActionButtonClasses.ShowStreaming} ShowingStreaming=${appActionButtonClasses.ShowingStreaming} Green=${appActionButtonClasses.Green} ` +
     `PlayButtonContainer=${appActionButtonClasses.PlayButtonContainer} PlayBar=${playSectionClasses.PlayBar} ` +
     `MenuButton=${playSectionClasses.MenuButton} InnerContainer=${appDetailsClasses.InnerContainer}`,
     ""
