@@ -1,10 +1,10 @@
 import { ButtonItem, Dropdown, Field, PanelSection, PanelSectionRow, TextField, ToggleField, staticClasses } from "@decky/ui";
 import { ScannedHost, State, loadState, refreshHostApps, scanHosts, subscribe, updateSettings, useMoonbeamState } from "./store";
 import { definePlugin, toaster } from "@decky/api";
-import { FaMoon } from "react-icons/fa";
+import { MoonbeamIcon } from "./icon";
 import { patchGamePage } from "./gamepage";
 import { watchStreamEnd } from "./steam";
-import { syncCollection } from "./collection";
+import { syncCollections } from "./collection";
 import { useState } from "react";
 
 function toast(body: string): void {
@@ -98,7 +98,7 @@ function Content() {
     <>
       <PanelSection title={hosts.length > 1 ? "PCs" : "PC"}>
         {hosts.length > 1 && <PanelSectionRow>
-          <Field label="Preferred PC" description="Listed first, refreshed with the address below" />
+          <Field label="Preferred PC" description="The PC the address below belongs to" />
         </PanelSectionRow>}
         <PanelSectionRow>
           <Dropdown
@@ -138,7 +138,9 @@ function Content() {
         <PanelSectionRow>
           <ToggleField
             label="Moonbeam collection"
-            description="Keep a collection in your library with every game you can stream"
+            description={hosts.length > 1
+              ? "Keep collections in your library with every game you can stream, from any PC and from each PC"
+              : "Keep a collection in your library with every game you can stream"}
             checked={settings.collection}
             onChange={(value) => { updateSettings({ collection: value }).catch((e) => console.error(e)); }}
           />
@@ -153,7 +155,7 @@ function Content() {
         <PanelSectionRow>
           <ToggleField
             label="Replace Steam's stream"
-            description="Steam's own “Stream from PC” becomes Moonbeam, instead of adding a Moonbeam menu to the ▼"
+            description="In the ▼ menu, PCs that have the game offer only Moonbeam, not Steam's “Stream from”"
             checked={settings.replaceSteamStream}
             onChange={(value) => { updateSettings({ replaceSteamStream: value }).catch((e) => console.error(e)); }}
           />
@@ -178,8 +180,8 @@ function watchCollection(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const onChange = (state: State): void => {
-    const { settings, apps, loaded } = state;
-    const key = JSON.stringify([settings.host, settings.collection, settings.shortcutAppId, apps]);
+    const { settings, hosts, loaded } = state;
+    const key = JSON.stringify([settings.collection, settings.shortcutAppId, hosts.map((host) => [host.name, host.apps])]);
     if (!loaded || key === lastKey) {
       return;
     }
@@ -187,7 +189,7 @@ function watchCollection(): () => void {
     lastKey = key;
     clearTimeout(timer);
     timer = setTimeout(() => {
-      syncCollection(apps, settings.collection, settings.shortcutAppId)
+      syncCollections(hosts, settings.collection, settings.shortcutAppId)
         .then((count) => console.log(`Moonbeam: collection has ${count} games`))
         .catch((e) => console.error("Moonbeam: failed to sync collection", e));
     }, 1000);
@@ -210,7 +212,7 @@ export default definePlugin(() => {
     name: "Moonbeam",
     titleView: <div className={staticClasses.Title}>Moonbeam</div>,
     content: <Content />,
-    icon: <FaMoon />,
+    icon: <MoonbeamIcon />,
     onDismount() {
       unpatchGamePage();
       unwatchStreamEnd();

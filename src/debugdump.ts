@@ -130,22 +130,3 @@ export async function dumpGamePage(anchor: Element | null, appId: number, appNam
   console.log(`Moonbeam: game page snapshot saved to ${path}`);
 }
 
-/** Writes a snapshot of Steam's launch menu (its streaming items), once per game and session. */
-export async function dumpMenu(doc: Document, appId: number, isPatched: IsPatched): Promise<void> {
-  const className = appActionButtonClasses.StreamingContextMenuItem;
-  const items = className ? [...doc.querySelectorAll(`.${CSS.escape(className)}`)] : [];
-  const sections = [
-    `Moonbeam launch menu snapshot for ${appId}, ${new Date().toISOString()}`,
-    `StreamingContextMenuItem=${className}`,
-    ""
-  ];
-  items.forEach((item, index) => {
-    sections.push(`== Components above item ${index} ==`, ...describeFibers(item, isPatched), "");
-  });
-  const menu = items[0]?.parentElement?.parentElement ?? null;
-  if (menu !== null) {
-    sections.push("== Menu elements ==", ...describeElements(menu));
-  }
-  const path = await saveDebug(`menu-${appId}.txt`, sections.join("\n"));
-  console.log(`Moonbeam: menu snapshot saved to ${path}`);
-}

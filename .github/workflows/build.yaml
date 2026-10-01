@@ -42,13 +42,13 @@ jobs:
         run: |
           mkdir -p out/Moonbeam
           cp -r dist main.py plugin.json package.json LICENSE README.md out/Moonbeam/
-          (cd out && zip -qr ../moonbeam.zip Moonbeam)
+          (cd out && zip -qr ../decky-moonbeam.zip Moonbeam)
 
       # The downloaded artifact is directly installable (it contains the Moonbeam folder)
       - name: Upload plugin
         uses: actions/upload-artifact@v7
         with:
-          name: Moonbeam
+          name: decky-moonbeam
           path: out/
           if-no-files-found: error
 
@@ -62,4 +62,4 @@ jobs:
           name: 'Nightly Release'
           prerelease: false
           body: Latest Moonbeam build from main.
-          files: ./moonbeam.zip
+          files: ./decky-moonbeam.zip
