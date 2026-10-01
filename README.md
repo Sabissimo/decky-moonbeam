@@ -100,7 +100,7 @@ For example, with GAMING-PC and LAPTOP online and both having the game:
 | **Close game on PC when stream ends** | Moonlight asks the host to quit the app when the stream ends (`--quit-after`). For games started with `steam://` links, see [Steam games: Big Picture mode and closing them](#steam-games-big-picture-mode-and-closing-them-when-the-stream-ends). |
 | **Replace Steam's stream** | Shows **Moonbeam from: ‹PC›** instead of Steam's **Stream from: ‹PC›** for PCs that have the game (see [The ▼ menu](#the--menu)). |
 | **Debug logging** | Writes detailed log lines and snapshots of game pages to `~/homebrew/logs/Moonbeam/`. Leave it off unless troubleshooting. |
-| **Power** | Each PC's status (checked every 10 seconds while the menu is open), with **Wake** while it's offline and **Shut down** while it's online. See [Waking and shutting down PCs](#waking-and-shutting-down-pcs). |
+| **Power** | Each PC's status (checked every 10 seconds while the menu is open), with **Wake** while it's offline and **Shut down** while it's online (only for PCs whose app list has the **Shut down** app). See [Waking and shutting down PCs](#waking-and-shutting-down-pcs). |
 | **Scan for PCs** | Looks for Sunshine/Apollo/Vibepollo PCs on the network (about 3 seconds) and shows whether each is paired with Moonlight. Unpaired PCs must be paired in Moonlight first. |
 
 ## Setting up the host
@@ -202,7 +202,7 @@ Epic's launcher keeps running on the PC, ready for the next game.
 - Use a wired connection: most Wi-Fi cards can't wake a PC. Waking from full shutdown also needs Windows' *Fast startup* off on many PCs (**Control Panel → Power Options → Choose what the power buttons do**); waking from sleep usually works without it.
 - The Deck must be on the same network. If **Wake** says Moonlight doesn't know the address, connect to the PC once in Moonlight while it's on.
 
-**Shut down** starts an app called **Shut down** on the PC, in the background (no stream window), so the PC needs that app. In the host's web UI, **Applications → Add New**:
+**Shut down** starts an app called **Shut down** on the PC, in the background (no stream window), so the PC needs that app; the button only shows for PCs whose app list has it (press **Refresh app list from PC** after adding it). In the host's web UI, **Applications → Add New**:
 
 - **Application Name:** `Shut down`
 - **Command:** `shutdown /s /t 0`

@@ -50,7 +50,12 @@ const STATUS_INTERVAL_MS = 10000;
 const WAKING_INTERVAL_MS = 3000;
 const WAKING_TIMEOUT_MS = 120000;
 
-/** Each PC's status, with Wake (offline) or Shut down (online). */
+/** Whether the PC's app list has the "Shut down" app that Shut down starts. */
+function hasShutdownApp(host: Host): boolean {
+  return host.apps.some((app) => app.toLowerCase().replace(/[^0-9a-z]/g, "") === "shutdown");
+}
+
+/** Each PC's status, with Wake (offline) or Shut down (online, when the PC has the app for it). */
 function PcPower({ hosts }: { hosts: Host[] }) {
   const [online, setOnline] = useState<Record<string, boolean> | null>(null);
   // PCs woken recently (checked more often until they answer), by name
@@ -137,7 +142,8 @@ function PcPower({ hosts }: { hosts: Host[] }) {
           <PanelSectionRow key={host.name}>
             <Field label={host.name} description={status} bottomSeparator="none" />
             {isOnline
-              ? <ButtonItem layout="below" disabled={busy !== null} onClick={() => confirmShutDown(host)}>Shut down</ButtonItem>
+              ? hasShutdownApp(host) &&
+                <ButtonItem layout="below" disabled={busy !== null} onClick={() => confirmShutDown(host)}>Shut down</ButtonItem>
               : <ButtonItem layout="below" disabled={busy !== null || !host.canWake || online === null} onClick={() => { wake(host).catch((e) => console.error(e)); }}>
                 {host.canWake ? "Wake" : "Wake (connect once in Moonlight first)"}
               </ButtonItem>}
