@@ -26,6 +26,7 @@ Nothing extra runs on the PC. Moonbeam only talks to the streaming host and reus
 - **App lists without opening Moonlight.** Read from Moonlight's config, refreshed from the PC on demand, directly from the host if needed.
 - **Network scan** for Sunshine/Apollo/Vibepollo PCs, showing which are paired.
 - **Optional quit on exit:** close the game on the PC when the stream ends.
+- **Wake and shut down PCs** from the Quick Access menu.
 
 ## Requirements
 
@@ -99,6 +100,7 @@ For example, with GAMING-PC and LAPTOP online and both having the game:
 | **Close game on PC when stream ends** | Moonlight asks the host to quit the app when the stream ends (`--quit-after`). For games started with `steam://` links, see [Steam games: Big Picture mode and closing them](#steam-games-big-picture-mode-and-closing-them-when-the-stream-ends). |
 | **Replace Steam's stream** | Shows **Moonbeam from: ‹PC›** instead of Steam's **Stream from: ‹PC›** for PCs that have the game (see [The ▼ menu](#the--menu)). |
 | **Debug logging** | Writes detailed log lines and snapshots of game pages to `~/homebrew/logs/Moonbeam/`. Leave it off unless troubleshooting. |
+| **Power** | Each PC's status (checked every 10 seconds while the menu is open), with **Wake** while it's offline and **Shut down** while it's online. See [Waking and shutting down PCs](#waking-and-shutting-down-pcs). |
 | **Scan for PCs** | Looks for Sunshine/Apollo/Vibepollo PCs on the network (about 3 seconds) and shows whether each is paired with Moonlight. Unpaired PCs must be paired in Moonlight first. |
 
 ## Setting up the host
@@ -191,6 +193,25 @@ Epic's launcher keeps running on the PC, ready for the next game.
 | Non-Steam game or emulator | the game's `.exe` | yes | none, the host closes it |
 | Game from a launcher | the launcher's link or command | yes | close by the game's folder |
 
+### Waking and shutting down PCs
+
+**Wake** sends Wake-on-LAN packets from the Deck, to the network card address (MAC) Moonlight saved for the PC. On the PC:
+
+- Turn on Wake-on-LAN in the BIOS/UEFI (often *Wake on LAN*, *Power On By PCI-E* or *Resume by LAN*).
+- In Windows, **Device Manager → network adapter → Properties**: on **Power Management**, tick *Allow this device to wake the computer*; on **Advanced**, enable *Wake on Magic Packet*.
+- Use a wired connection: most Wi-Fi cards can't wake a PC. Waking from full shutdown also needs Windows' *Fast startup* off on many PCs (**Control Panel → Power Options → Choose what the power buttons do**); waking from sleep usually works without it.
+- The Deck must be on the same network. If **Wake** says Moonlight doesn't know the address, connect to the PC once in Moonlight while it's on.
+
+**Shut down** starts an app called **Shut down** on the PC, in the background (no stream window), so the PC needs that app. In the host's web UI, **Applications → Add New**:
+
+- **Application Name:** `Shut down`
+- **Command:** `shutdown /s /t 0`
+- tick **Exclude global prep commands**.
+
+If another app is still running on the PC (e.g. a game after a stream without **Close game on PC when stream ends**), Moonbeam quits it first, which also runs its undo commands. Moonbeam asks before shutting down: a game in progress is closed without saving.
+
+The **Shut down** app is in the PC's app list like any other; it doesn't match a game, so it gets no Moonbeam on any game page.
+
 ## How it works
 
 ### App lists
@@ -217,6 +238,12 @@ Moonbeam starts one hidden non-Steam shortcut (`/usr/bin/flatpak`) with the laun
 - The ▼ opens Moonbeam's own menu instead of Steam's. Choosing this device or a PC sets Steam's choice for the game (`SteamClient.Apps.SetStreamingClientForApp`, shown by `selected_clientid`), exactly like Steam's menu. Choosing Moonbeam also selects that PC in Steam, and remembers Moonbeam for the game in the plugin's settings.
 - Steam's game page is made of MobX observer components whose render can't be patched after their first render, which is why Moonbeam patches the buttons' components instead of the page.
 
+### Power
+
+- The PCs' status comes from the same `/serverinfo` check as the game page.
+- **Wake** sends the 102-byte magic packet (6 × `FF`, then the MAC 16 times) to UDP ports 9, 7 and 47009 at the broadcast address and at the PC's known IPv4 addresses and their /24 broadcast. The MAC is the one Moonlight saved (`mac` in `Moonlight.conf`).
+- **Shut down** finds the **Shut down** app in the PC's app list (`/applist`, with Moonlight's client certificate) and starts it with `/launch`, the request Moonlight sends before a stream; the host runs the app's command right away. No stream follows. If the host reports another app running, Moonbeam sends `/cancel` (quit) and launches again.
+
 ### Collection and network scan
 
 - The **Moonbeam** collection contains every game and non-Steam shortcut in the library whose name matches an app on any PC; with several PCs, each *Moonbeam: ‹PC›* collection those matching that PC's apps. They are updated when the app lists change, and a PC's collection is removed when the PC is no longer in Moonlight.
@@ -234,6 +261,8 @@ Moonbeam starts one hidden non-Steam shortcut (`/usr/bin/flatpak`) with the laun
 | Host refuses the app list (401/403) | The host doesn't let this Moonlight client list apps. Check the client's permissions in the host's web UI (Apollo/Vibepollo have per-client permissions). |
 | **Scan for PCs** finds nothing | The host must be running on the same network. Some routers and guest Wi-Fi block mDNS; set **PC address** instead. |
 | "Failed to create the Moonlight shortcut" | Restart Steam and try again. |
+| **Wake** doesn't wake the PC | Wake-on-LAN must be enabled on the PC and its network card, with a wired connection; see [Waking and shutting down PCs](#waking-and-shutting-down-pcs). |
+| "No app named “Shut down”" | Add the **Shut down** app on the PC (see [Waking and shutting down PCs](#waking-and-shutting-down-pcs)), then try again. |
 | The game keeps running on the PC | See [Closing games](#steam-games-big-picture-mode-and-closing-them-when-the-stream-ends). |
 | Something else on the game page | Turn on **Debug logging**, open the game page (and the ▼ menu), then send `~/homebrew/logs/Moonbeam/` (the log plus `gamepage-<appid>.txt`) with your report. The snapshots contain the page's text, including friends' names. |
 

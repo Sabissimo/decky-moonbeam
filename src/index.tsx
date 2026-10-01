@@ -1,11 +1,12 @@
-import { ButtonItem, Dropdown, Field, PanelSection, PanelSectionRow, TextField, ToggleField, staticClasses } from "@decky/ui";
-import { ScannedHost, State, loadState, refreshHostApps, scanHosts, subscribe, updateSettings, useMoonbeamState } from "./store";
+import { ButtonItem, ConfirmModal, Dropdown, Field, PanelSection, PanelSectionRow, TextField, ToggleField, showModal, staticClasses } from "@decky/ui";
+import { Host, ScannedHost, State, checkHosts, loadState, refreshHostApps, scanHosts, shutdownHost, subscribe, updateSettings,
+  useMoonbeamState, wakeHost } from "./store";
 import { definePlugin, toaster } from "@decky/api";
 import { MoonbeamIcon } from "./icon";
 import { patchGamePage } from "./gamepage";
 import { watchStreamEnd } from "./steam";
 import { syncCollections } from "./collection";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 function toast(body: string): void {
   toaster.toast({ title: "Moonbeam", body });
@@ -41,6 +42,108 @@ function NetworkScan() {
           />
         </PanelSectionRow>
       ))}
+    </PanelSection>
+  );
+}
+
+const STATUS_INTERVAL_MS = 10000;
+const WAKING_INTERVAL_MS = 3000;
+const WAKING_TIMEOUT_MS = 120000;
+
+/** Each PC's status, with Wake (offline) or Shut down (online). */
+function PcPower({ hosts }: { hosts: Host[] }) {
+  const [online, setOnline] = useState<Record<string, boolean> | null>(null);
+  // PCs woken recently (checked more often until they answer), by name
+  const [waking, setWaking] = useState<Record<string, number>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const anyWaking = Object.values(waking).some((started) => Date.now() - started < WAKING_TIMEOUT_MS);
+  useEffect(() => {
+    let active = true;
+    const update = (): void => {
+      checkHosts()
+        .then((result) => {
+          if (!active) {
+            return;
+          }
+          setOnline(result);
+          setWaking((current) => {
+            const next = { ...current };
+            for (const name of Object.keys(next)) {
+              if (result[name]) {
+                toast(`${name} is awake`);
+                delete next[name];
+              } else if (Date.now() - next[name] >= WAKING_TIMEOUT_MS) {
+                toast(`${name} didn't wake up. Check that Wake-on-LAN is enabled on it.`);
+                delete next[name];
+              }
+            }
+            return next;
+          });
+        })
+        .catch((e) => console.error(e));
+    };
+    update();
+    const timer = setInterval(update, anyWaking ? WAKING_INTERVAL_MS : STATUS_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [anyWaking]);
+
+  const wake = async (host: Host): Promise<void> => {
+    setBusy(host.name);
+    try {
+      const result = await wakeHost(host.name);
+      if (result.ok) {
+        setWaking((current) => ({ ...current, [host.name]: Date.now() }));
+        toast(`Wake signal sent to ${host.name}`);
+      } else {
+        toast(`Couldn't wake ${host.name}: ${result.error ?? "unknown error"}`);
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const shutDown = async (host: Host): Promise<void> => {
+    setBusy(host.name);
+    try {
+      const result = await shutdownHost(host.name);
+      toast(result.ok ? `${host.name} is shutting down` : `Couldn't shut down ${host.name}: ${result.error ?? "unknown error"}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmShutDown = (host: Host): void => {
+    showModal(
+      <ConfirmModal
+        strTitle={`Shut down ${host.name}?`}
+        strDescription="A game running on it is closed without saving."
+        strOKButtonText="Shut down"
+        bDestructiveWarning
+        onOK={() => { shutDown(host).catch((e) => console.error(e)); }}
+      />
+    );
+  };
+
+  return (
+    <PanelSection title="Power">
+      {hosts.map((host) => {
+        const isOnline = online?.[host.name] === true;
+        const status = online === null ? "Checking..." : waking[host.name] !== undefined ? "Waking up..." : isOnline ? "Online" : "Offline";
+        return (
+          <PanelSectionRow key={host.name}>
+            <Field label={host.name} description={status} bottomSeparator="none" />
+            {isOnline
+              ? <ButtonItem layout="below" disabled={busy !== null} onClick={() => confirmShutDown(host)}>Shut down</ButtonItem>
+              : <ButtonItem layout="below" disabled={busy !== null || !host.canWake || online === null} onClick={() => { wake(host).catch((e) => console.error(e)); }}>
+                {host.canWake ? "Wake" : "Wake (connect once in Moonlight first)"}
+              </ButtonItem>}
+          </PanelSectionRow>
+        );
+      })}
     </PanelSection>
   );
 }
@@ -134,6 +237,7 @@ function Content() {
           />
         </PanelSectionRow>
       </PanelSection>
+      <PcPower hosts={hosts} />
       <PanelSection title="Options">
         <PanelSectionRow>
           <ToggleField

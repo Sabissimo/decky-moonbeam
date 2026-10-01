@@ -138,12 +138,22 @@ class DirectFetchTest(unittest.TestCase):
         self.identity = {"certificate": client_cert.read_text(), "key": client_key.read_text()}
 
         test = self
+        self.https_paths = []
+        self.app_running = False
 
         class HttpsHandler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 test.https_path = self.path
-                body = (b'<root status_code="200"><App><AppTitle>Desktop</AppTitle></App>'
-                        b'<App><AppTitle>ELDEN RING</AppTitle></App></root>')
+                test.https_paths.append(self.path.split("?")[0])
+                if self.path.startswith("/launch") and test.app_running:
+                    body = b'<root status_code="400" status_message="An app is already running on this host"/>'
+                elif self.path.startswith("/launch") or self.path.startswith("/cancel"):
+                    test.app_running = self.path.startswith("/launch")
+                    body = b'<root status_code="200"><gamesession>1</gamesession></root>'
+                else:
+                    body = (b'<root status_code="200"><App><AppTitle>Desktop</AppTitle><ID>1</ID></App>'
+                            b'<App><AppTitle>ELDEN RING</AppTitle><ID>2</ID></App>'
+                            b'<App><AppTitle>Shut down</AppTitle><ID>7</ID></App></root>')
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -187,7 +197,7 @@ class DirectFetchTest(unittest.TestCase):
                                           server_cert_pem, self.tmp / "work")
 
     def test_fetch_with_pinned_cert(self):
-        self.assertEqual(self.fetch(self.identity, self.server_cert.read_text()), ["Desktop", "ELDEN RING"])
+        self.assertEqual(self.fetch(self.identity, self.server_cert.read_text()), ["Desktop", "ELDEN RING", "Shut down"])
         self.assertTrue(self.https_path.startswith("/applist?uniqueid=0123456789ABCDEF&uuid="))
 
     def test_wrong_pinned_cert(self):
@@ -219,13 +229,29 @@ class DirectFetchTest(unittest.TestCase):
             import asyncio
             result = asyncio.run(plugin.refresh_apps("GAMING-PC"))
             self.assertEqual(result["source"], "host")
-            self.assertEqual(result["apps"], ["Desktop", "ELDEN RING"])
+            self.assertEqual(result["apps"], ["Desktop", "ELDEN RING", "Shut down"])
             # Saved and used afterwards, even though Moonlight's own list is older
             state = asyncio.run(plugin.get_state())
-            self.assertEqual(state["hosts"][0]["apps"], ["Desktop", "ELDEN RING"])
+            self.assertEqual(state["hosts"][0]["apps"], ["Desktop", "ELDEN RING", "Shut down"])
         finally:
             del decky.DECKY_USER_HOME
             del decky.DECKY_PLUGIN_RUNTIME_DIR
+
+    def launch(self, names):
+        return main.launch_app_direct("127.0.0.1", self.http.server_address[1], self.identity,
+                                      self.server_cert.read_text(), self.tmp / "work", names)
+
+    def test_launch_shutdown_app(self):
+        self.assertEqual(self.launch(main.SHUTDOWN_APP_NAMES), "Shut down")
+        self.assertIn("appid=7&", self.https_path)
+        # Another app running: quit it first
+        self.https_paths.clear()
+        self.assertEqual(self.launch(("shutdown",)), "Shut down")
+        self.assertEqual(self.https_paths, ["/applist", "/launch", "/cancel", "/launch"])
+
+    def test_launch_missing_app(self):
+        with self.assertRaises(LookupError):
+            self.launch(("Restart",))
 
     def test_check_hosts(self):
         conf_dir = self.tmp / "home" / ".var" / "app" / main.FLATPAK_ID / "config" / main.CONF_SUBPATH.parent
@@ -306,6 +332,21 @@ class DiscoveryTest(unittest.TestCase):
             thread.join()
             responder.close()
         self.assertEqual(hosts, [{"instance": "GAMING-PC", "address": "192.168.1.10", "port": 48000}])
+
+
+class WakeOnLanTest(unittest.TestCase):
+    def test_parse_mac(self):
+        raw = main.qt_unescape('"@ByteArray(\\0\\x15]\\xab\\xcd\\xef)"')
+        self.assertEqual(main.parse_mac(raw), bytes([0x00, 0x15, 0x5D, 0xAB, 0xCD, 0xEF]))
+        self.assertEqual(main.parse_mac("aa:bb:cc:dd:ee:ff"), bytes.fromhex("aabbccddeeff"))
+        self.assertIsNone(main.parse_mac(""))
+        self.assertIsNone(main.parse_mac("\0" * 6))
+
+    def test_packet(self):
+        packet = main.wake_on_lan_packet(bytes.fromhex("001122334455"))
+        self.assertEqual(len(packet), 102)
+        self.assertEqual(packet[:6], b"\xff" * 6)
+        self.assertEqual(packet[6:12], bytes.fromhex("001122334455"))
 
 
 class SaveDebugTest(unittest.TestCase):

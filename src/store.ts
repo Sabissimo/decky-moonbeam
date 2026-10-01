@@ -19,6 +19,8 @@ export interface Host {
   name: string;
   uuid: string;
   apps: string[];
+  // Moonlight saved the PC's MAC address, needed for Wake-on-LAN
+  canWake: boolean;
 }
 
 export interface State {
@@ -43,6 +45,16 @@ export interface ScannedHost {
 }
 
 const scanHostsCall = callable<[], ScannedHost[]>("scan_hosts");
+export interface PowerResult {
+  ok: boolean;
+  error: string | null;
+}
+
+/** Sends Wake-on-LAN packets to the PC. */
+export const wakeHost = callable<[host: string], PowerResult>("wake_host");
+/** Starts the PC's "Shut down" app, without streaming. */
+export const shutdownHost = callable<[host: string], PowerResult>("shutdown_host");
+
 /** Which of Moonlight's PCs answer right now, by name. */
 export const checkHosts = callable<[], Record<string, boolean>>("check_hosts");
 const logCall = callable<[message: string], void>("log");

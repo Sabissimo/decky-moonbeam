@@ -23,6 +23,8 @@ LIST_TIMEOUT = 30
 HTTP_TIMEOUT = 5
 # Checking whether a PC is online: short, the PC is on the local network
 ONLINE_TIMEOUT = 1.5
+# Host app whose command shuts the PC down
+SHUTDOWN_APP_NAMES = ("Shut down", "Shutdown")
 DEFAULT_HTTP_PORT = 47989
 DEFAULT_HTTPS_PORT = 47984
 # Same placeholder id Moonlight uses, the host identifies clients by certificate
@@ -139,6 +141,7 @@ def parse_moonlight_conf(text: str) -> list[dict[str, Any]]:
                           "uuid": value(f"{i}\\uuid"),
                           "addresses": addresses,
                           "serverCert": value(f"{i}\\srvcert"),
+                          "mac": value(f"{i}\\mac"),
                           "apps": apps})
         if hosts:
             return hosts
@@ -197,10 +200,16 @@ def check_status(xml: str, what: str) -> None:
         raise RuntimeError(f"Host refused the {what} request ({status}: {xml_root_attribute(xml, 'status_message') or ''})")
 
 
-def parse_app_list(xml: str) -> list[str]:
+def parse_app_entries(xml: str) -> list[tuple[str, str]]:
+    """(title, id) of each app in an app list."""
     check_status(xml, "app list")
     apps = re.findall(r"<App(?:\s[^>]*)?>(.*?)</App\s*>", xml, re.DOTALL)
-    return [title for title in (xml_text(app, "AppTitle") for app in apps) if title]
+    entries = [(xml_text(app, "AppTitle") or "", xml_text(app, "ID") or "") for app in apps]
+    return [(title, app_id) for title, app_id in entries if title]
+
+
+def parse_app_list(xml: str) -> list[str]:
+    return [title for title, _ in parse_app_entries(xml)]
 
 
 def parse_server_info(xml: str) -> dict[str, str]:
@@ -233,6 +242,12 @@ def _pem_to_der(pem: str) -> Optional[bytes]:
 def fetch_app_list_direct(address: str, port: int, identity: dict[str, str], server_cert_pem: str,
                           work_dir: Path) -> list[str]:
     """Fetches the app list from the host over HTTPS with Moonlight's client certificate."""
+    return parse_app_list(host_request(address, port, identity, server_cert_pem, work_dir, "/applist"))
+
+
+def host_request(address: str, port: int, identity: dict[str, str], server_cert_pem: str, work_dir: Path,
+                 path: str, query: str = "") -> str:
+    """Makes a GameStream request over HTTPS with Moonlight's client certificate, returns the XML."""
     https_port = _get_https_port(address, port)
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -258,11 +273,86 @@ def fetch_app_list_direct(address: str, port: int, identity: dict[str, str], ser
         if expected is not None and actual != expected:
             raise RuntimeError("Host certificate does not match the one paired with Moonlight")
 
-        conn.request("GET", f"/applist?uniqueid={UNIQUE_ID}&uuid={uuid.uuid4().hex}")
-        response = conn.getresponse()
-        return parse_app_list(response.read().decode(errors="replace"))
+        conn.request("GET", f"{path}?uniqueid={UNIQUE_ID}&uuid={uuid.uuid4().hex}{query}")
+        return conn.getresponse().read().decode(errors="replace")
     finally:
         conn.close()
+
+
+def _simple_name(name: str) -> str:
+    return re.sub(r"[^0-9a-z]", "", name.lower())
+
+
+def launch_app_direct(address: str, port: int, identity: dict[str, str], server_cert_pem: str, work_dir: Path,
+                      app_names: tuple[str, ...]) -> str:
+    """
+    Starts an app on the host without streaming it (the host runs its command right away), quitting the
+    running app first if needed. Returns the app's title.
+    """
+    def request(path: str, query: str = "") -> str:
+        return host_request(address, port, identity, server_cert_pem, work_dir, path, query)
+
+    wanted = {_simple_name(name) for name in app_names}
+    app = next(((title, app_id) for title, app_id in parse_app_entries(request("/applist"))
+                if _simple_name(title) in wanted), None)
+    if app is None:
+        raise LookupError(f"No app named \u201c{app_names[0]}\u201d on the PC")
+    title, app_id = app
+
+    # The same parameters Moonlight sends; no stream follows
+    query = (f"&appid={app_id}&mode=1280x720x60&additionalStates=1&sops=0&rikey={os.urandom(16).hex()}"
+             f"&rikeyid={struct.unpack('>i', os.urandom(4))[0]}&localAudioPlayMode=0"
+             "&surroundAudioInfo=196610&remoteControllersBitmap=0&gcmap=0")
+    try:
+        check_status(request("/launch", query), "launch")
+    except RuntimeError:
+        # Usually another app is running: quit it (its undo commands run) and try again
+        check_status(request("/cancel"), "quit")
+        check_status(request("/launch", query), "launch")
+    return title
+
+
+# ---------------------------------------------------------------------------
+# Wake-on-LAN
+# ---------------------------------------------------------------------------
+
+# Ports Moonlight sends its wake packets to (any works, the network card looks at the content)
+WOL_PORTS = (9, 7, 47009)
+
+
+def parse_mac(raw: str) -> Optional[bytes]:
+    """The MAC address Moonlight saved, as raw bytes (or text like aa:bb:cc:dd:ee:ff)."""
+    if len(raw) == 6 and all(ord(char) < 256 for char in raw):
+        mac = bytes(ord(char) for char in raw)
+    else:
+        digits = re.sub(r"[:\-.\s]", "", raw)
+        mac = bytes.fromhex(digits) if re.fullmatch(r"[0-9a-fA-F]{12}", digits) else None
+    return mac if mac and any(mac) else None
+
+
+def wake_on_lan_packet(mac: bytes) -> bytes:
+    return b"\xff" * 6 + mac * 16
+
+
+def send_wake_on_lan(mac: bytes, addresses: list[str]) -> None:
+    """Sends magic packets to the broadcast address and to the PC's known (IPv4) addresses and their /24."""
+    packet = wake_on_lan_packet(mac)
+    targets = ["255.255.255.255"]
+    for address in addresses:
+        if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", address):
+            targets += [address, address.rsplit(".", 1)[0] + ".255"]
+    sent = 0
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        for target in dict.fromkeys(targets):
+            for port in WOL_PORTS:
+                try:
+                    sock.sendto(packet, (target, port))
+                    sent += 1
+                except OSError as err:
+                    decky.logger.warning(f"Wake packet to {target}:{port} failed: {err}")
+    if sent == 0:
+        raise RuntimeError("Could not send the wake packet")
 
 
 def get_server_info(address: str, port: int, timeout: float = HTTP_TIMEOUT) -> dict[str, str]:
@@ -487,7 +577,8 @@ class Plugin:
             cached = settings["appCache"].get(host["name"])
             if cached is not None:
                 host["apps"] = cached
-        return [{"name": host["name"], "uuid": host["uuid"], "apps": host["apps"]} for host in hosts]
+        return [{"name": host["name"], "uuid": host["uuid"], "apps": host["apps"],
+                 "canWake": parse_mac(host.get("mac", "")) is not None} for host in hosts]
 
     async def get_state(self) -> dict[str, Any]:
         settings = self._read_settings()
@@ -513,7 +604,7 @@ class Plugin:
         settings = self._read_settings()
 
         async def check(host: dict[str, Any]) -> bool:
-            manual = settings["address"] if host["name"] == settings["host"] else ""
+            manual = self._manual_address(settings, host["name"])
             for entry in self._host_addresses(host, manual):
                 try:
                     info = await asyncio.to_thread(get_server_info, entry["address"], entry["port"], ONLINE_TIMEOUT)
@@ -527,7 +618,8 @@ class Plugin:
         results = await asyncio.gather(*(check(host) for host in hosts))
         return {host["name"]: online for host, online in zip(hosts, results)}
 
-    async def _fetch_direct(self, host_name: str, manual_address: str) -> list[str]:
+    async def _direct(self, host_name: str, manual_address: str, action, *args) -> Any:
+        """Runs a direct request (action(address, port, identity, server cert, work dir, *args)) at the host's addresses."""
         text = read_moonlight_conf()
         if text is None:
             raise RuntimeError("Moonlight config not found")
@@ -544,13 +636,51 @@ class Plugin:
         errors = []
         for entry in addresses:
             try:
-                return await asyncio.to_thread(fetch_app_list_direct, entry["address"], entry["port"], identity,
+                return await asyncio.to_thread(action, entry["address"], entry["port"], identity,
                                                host["serverCert"] if host else "",
-                                               Path(decky.DECKY_PLUGIN_RUNTIME_DIR))
+                                               Path(decky.DECKY_PLUGIN_RUNTIME_DIR), *args)
+            except LookupError:
+                # The PC answered, the request itself can't work
+                raise
             except Exception as err:
-                decky.logger.warning(f"Direct app list from {entry['address']}:{entry['port']} failed: {err}")
+                decky.logger.warning(f"Request to {entry['address']}:{entry['port']} failed: {err}")
                 errors.append(f"{entry['address']}: {err}")
         raise RuntimeError("; ".join(errors))
+
+    async def _fetch_direct(self, host_name: str, manual_address: str) -> list[str]:
+        return await self._direct(host_name, manual_address, fetch_app_list_direct)
+
+    def _manual_address(self, settings: dict[str, Any], host_name: str) -> str:
+        # The address in the menu belongs to the preferred PC
+        return settings["address"] if host_name == settings["host"] else ""
+
+    async def wake_host(self, host_name: str) -> dict[str, Any]:
+        """Sends Wake-on-LAN packets to the PC (its MAC address as saved by Moonlight)."""
+        host = next((h for h in read_moonlight_hosts() if h["name"] == host_name), None)
+        mac = parse_mac(host.get("mac", "")) if host else None
+        if host is None or mac is None:
+            return {"ok": False, "error": "Moonlight doesn't know the PC's network address (MAC) yet; "
+                                          "connect to it once in Moonlight"}
+        settings = self._read_settings()
+        addresses = [entry["address"] for entry in self._host_addresses(host, self._manual_address(settings, host_name))]
+        try:
+            await asyncio.to_thread(send_wake_on_lan, mac, addresses)
+        except Exception as err:
+            return {"ok": False, "error": str(err)}
+        return {"ok": True, "error": None}
+
+    async def shutdown_host(self, host_name: str) -> dict[str, Any]:
+        """Starts the PC's "Shut down" app (no stream), whose command shuts the PC down."""
+        settings = self._read_settings()
+        try:
+            await self._direct(host_name, self._manual_address(settings, host_name), launch_app_direct,
+                               SHUTDOWN_APP_NAMES)
+        except LookupError:
+            return {"ok": False, "error": "Add an app named \u201cShut down\u201d with the command "
+                                          "shutdown /s /t 0 on the PC (see the README)"}
+        except Exception as err:
+            return {"ok": False, "error": str(err)}
+        return {"ok": True, "error": None}
 
     async def refresh_apps(self, host: str) -> dict[str, Any]:
         """Gets the current app list: via Moonlight, then directly from the host, then the saved one."""
@@ -568,9 +698,7 @@ class Plugin:
 
         if apps is None:
             try:
-                # The address in the menu belongs to the preferred PC
-                address = settings["address"] if host == settings["host"] else ""
-                apps = await self._fetch_direct(host, address)
+                apps = await self._fetch_direct(host, self._manual_address(settings, host))
                 source = "host"
             except Exception as err:
                 decky.logger.warning(f"Direct app list failed: {err}")
