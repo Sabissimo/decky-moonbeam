@@ -52,6 +52,8 @@ let playBarInstance: { forceUpdate?: () => void; props?: any } | null = null;
 let pageRoot: ParentNode | null = null;
 // Steam's button component behind the Play button (also renders Steam's ▼)
 let steamButtonType: any = null;
+// Content of Steam's own ▼ (its icon), once seen on any page, for Moonbeam's ▼
+let steamSelectorIcon: ReactNode = null;
 // Class of Moonbeam's own ▼, which carries Steam's selector class too (for Steam's styling)
 const OWN_SELECTOR_CLASS = "moonbeam-selector";
 
@@ -341,10 +343,11 @@ function withLabel(children: ReactNode, label: string): ReactNode {
   return labelState.done ? replaced : <span>{label}</span>;
 }
 
-function Chevron() {
+/** Steam's ▼ icon: a small filled triangle (used until Steam's own icon has been seen). */
+function DownTriangle() {
   return (
-    <svg viewBox="0 0 16 16" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <path d="M3 6 L8 11 L13 6" />
+    <svg viewBox="0 0 36 36" width="10" height="10" fill="currentColor" aria-hidden="true">
+      <path d="M18 27 L3 11 H33 Z" />
     </svg>
   );
 }
@@ -360,7 +363,7 @@ function ownSelector(game: Game): ReactNode {
       className={`${appActionButtonClasses.StreamingSelector} ${OWN_SELECTOR_CLASS}`}
       onClick={(event: any) => openLaunchMenu(event, game)}
     >
-      <Chevron />
+      {steamSelectorIcon ?? <DownTriangle />}
     </Button>
   );
 }
@@ -392,6 +395,9 @@ function overrideProps(props: any): Override | null {
   }
 
   if (isSelector) {
+    if (!classes.includes(OWN_SELECTOR_CLASS) && props.children != null) {
+      steamSelectorIcon = props.children;
+    }
     return { props: { ...props, onClick: (event: any) => openLaunchMenu(event, game) } };
   }
 
