@@ -48,6 +48,10 @@ interface Game {
 let currentGame: Game | null = null;
 // Steam's play bar component of the open page (has bShowStreamingSelector), re-rendered on changes
 let playBarInstance: { forceUpdate?: () => void; props?: any } | null = null;
+// The open game page (its InnerContainer), where Steam's ▼ is looked for
+let pageRoot: ParentNode | null = null;
+// Class of Moonbeam's own ▼, which carries Steam's selector class too (for Steam's styling)
+const OWN_SELECTOR_CLASS = "moonbeam-selector";
 
 function refreshPlayBar(): void {
   try {
@@ -57,9 +61,26 @@ function refreshPlayBar(): void {
   }
 }
 
-/** Steam only shows its launch selector when the game can be streamed, i.e. the PC is online. */
+/**
+ * Whether Steam shows its launch selector (the ▼), i.e. Steam can stream the game from a PC.
+ * Looked for on the page: Steam's bShowStreamingSelector can be set while Steam doesn't draw the ▼
+ * (Remote Play disabled).
+ */
 function streamingAvailable(): boolean {
+  const className = appActionButtonClasses.StreamingSelector;
+  if (pageRoot !== null && className) {
+    return pageRoot.querySelector(`.${CSS.escape(className)}:not(.${OWN_SELECTOR_CLASS})`) !== null;
+  }
   return playBarInstance?.props?.bShowStreamingSelector === true;
+}
+
+/** Renders the play bar again if Steam's ▼ came or went since the play button was rendered. */
+function recheckSteamSelector(renderedWith: boolean): void {
+  setTimeout(() => {
+    if (currentGame !== null && streamingAvailable() !== renderedWith) {
+      refreshPlayBar();
+    }
+  }, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +352,7 @@ function ownSelector(game: Game): ReactNode {
   return (
     <DialogButton
       key="moonbeam-selector"
-      className={appActionButtonClasses.StreamingSelector}
+      className={`${appActionButtonClasses.StreamingSelector} ${OWN_SELECTOR_CLASS}`}
       onClick={(event: any) => openLaunchMenu(event, game)}
     >
       <Chevron />
@@ -370,7 +391,9 @@ function overrideProps(props: any): Override | null {
   }
 
   // Without Steam's ▼, Moonbeam's own one follows the Play button
-  const after = streamingAvailable() ? undefined : ownSelector(game);
+  const steamSelector = streamingAvailable();
+  recheckSteamSelector(steamSelector);
+  const after = steamSelector ? undefined : ownSelector(game);
   const option = chosenOption(game, options);
   if (option === null) {
     return after === undefined ? null : { props, after };
@@ -469,7 +492,7 @@ function discover(root: ParentNode): Discovery {
     ["selector", appActionButtonClasses.StreamingSelector]
   ];
   for (const [name, className] of targets) {
-    const element = className ? root.querySelector(`.${CSS.escape(className)}`) : null;
+    const element = className ? root.querySelector(`.${CSS.escape(className)}:not(.${OWN_SELECTOR_CLASS})`) : null;
     if (element === null) {
       continue;
     }
@@ -491,6 +514,7 @@ function discover(root: ParentNode): Discovery {
 export function attachToGamePage(anchor: Element, appId: number, appName: string): () => void {
   currentGame = { appId, appName };
   const root: ParentNode = anchor.closest(`.${CSS.escape(appDetailsClasses.InnerContainer)}`) ?? anchor.ownerDocument;
+  pageRoot = root;
   const started = Date.now();
   let last: Discovery | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -519,7 +543,8 @@ export function attachToGamePage(anchor: Element, appId: number, appName: string
   const report = setTimeout(() => {
     if (findHostApp(appName, getCurrentState().apps) !== null) {
       logToBackend(`Game page ${appId} (${appName}): play button: ${last?.playButton}, selector: ${last?.selector}, ` +
-        `patched: ${last?.patched}, play bar: ${last?.playBar}, streaming available: ${streamingAvailable()}, ` +
+        `patched: ${last?.patched}, play bar: ${last?.playBar}, Steam's ▼ shown: ${streamingAvailable()} ` +
+        `(bShowStreamingSelector: ${playBarInstance?.props?.bShowStreamingSelector}), ` +
         `online PCs: ${JSON.stringify(onlineHosts)}.`);
     }
   }, 4000);
@@ -531,6 +556,7 @@ export function attachToGamePage(anchor: Element, appId: number, appName: string
     if (currentGame?.appId === appId) {
       currentGame = null;
       playBarInstance = null;
+      pageRoot = null;
     }
   };
 }
