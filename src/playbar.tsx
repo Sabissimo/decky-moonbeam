@@ -82,24 +82,31 @@ function reactClassName(element: Element): string {
   return typeof className === "string" ? className : element.className;
 }
 
-// Steam's ▼ icon (svg attributes and content), saved once seen so Moonbeam's ▼ can use it too
-const ICON_STORAGE_KEY = "moonbeam:selectorIcon";
+// Steam's icons (svg attributes and content), saved once seen on any page, for Moonbeam's elements:
+// the ▼ and the Stream button's icon
 const ICON_ATTRIBUTES = ["class", "viewBox", "fill", "xmlns", "width", "height", "preserveAspectRatio"];
-interface SelectorIcon {
+interface SavedIcon {
   attributes: Record<string, string>;
   content: string;
 }
-let selectorIcon: SelectorIcon | null = (() => {
+const SELECTOR_ICON_KEY = "moonbeam:selectorIcon";
+const STREAM_ICON_KEY = "moonbeam:streamIcon";
+
+function loadIcon(key: string): SavedIcon | null {
   try {
-    return JSON.parse(localStorage.getItem(ICON_STORAGE_KEY) ?? "null");
+    return JSON.parse(localStorage.getItem(key) ?? "null");
   } catch {
     return null;
   }
-})();
+}
+const savedIcons: Record<string, SavedIcon | null> = {
+  [SELECTOR_ICON_KEY]: loadIcon(SELECTOR_ICON_KEY),
+  [STREAM_ICON_KEY]: loadIcon(STREAM_ICON_KEY)
+};
 
-function saveSelectorIcon(selector: Element): void {
-  const svg = selector.querySelector("svg");
-  if (svg === null) {
+function saveIcon(key: string, element: Element | null): void {
+  const svg = element?.querySelector("svg");
+  if (!svg) {
     return;
   }
   const attributes: Record<string, string> = {};
@@ -110,14 +117,19 @@ function saveSelectorIcon(selector: Element): void {
     }
   }
   const icon = { attributes, content: svg.innerHTML };
-  if (JSON.stringify(icon) !== JSON.stringify(selectorIcon)) {
-    selectorIcon = icon;
+  if (JSON.stringify(icon) !== JSON.stringify(savedIcons[key])) {
+    savedIcons[key] = icon;
     try {
-      localStorage.setItem(ICON_STORAGE_KEY, JSON.stringify(icon));
+      localStorage.setItem(key, JSON.stringify(icon));
     } catch {
       // Only a nicer icon next time
     }
   }
+}
+
+function renderIcon(icon: SavedIcon, key?: string): ReactNode {
+  const { class: className, ...rest } = icon.attributes;
+  return <svg key={key} {...rest} className={className} dangerouslySetInnerHTML={{ __html: icon.content }} />;
 }
 
 // Whether the play button currently shows Moonbeam
@@ -139,7 +151,11 @@ function syncRowClasses(): void {
     const steamClasses = classesOf(reactClassName(row));
     const steamSelector = row.querySelector(`.${CSS.escape(selectorClass)}:not(.${OWN_SELECTOR_CLASS})`);
     if (steamSelector !== null) {
-      saveSelectorIcon(steamSelector);
+      saveIcon(SELECTOR_ICON_KEY, steamSelector);
+      // Steam's own Stream state (a PC chosen in Steam's ▼): its button shows Steam's stream icon
+      if (!moonbeamOnButton && currentGame !== null && selectedRemoteClient(getOverview(currentGame.appId)) !== null) {
+        saveIcon(STREAM_ICON_KEY, row.querySelector(`.${CSS.escape(appActionButtonClasses.PlayButton)}`));
+      }
     }
     const wanted: Array<[string, boolean]> = [
       [appActionButtonClasses.ShowingStreaming, row.querySelector(`.${OWN_SELECTOR_CLASS}`) !== null],
@@ -418,15 +434,49 @@ function replaceLabel(node: ReactNode, label: string, state: { done: boolean }):
   return node;
 }
 
+/** All text in the content. */
+function textOf(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(textOf).join("");
+  }
+  if (isValidElement(node)) {
+    return textOf((node as ReactElement<any>).props.children);
+  }
+  return "";
+}
+
+/** Steam's play icon (a filled triangle), used until Steam's stream icon has been seen. */
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 36 36" width="24" height="24" fill="currentColor" aria-hidden="true">
+      <path d="M8 4 L31 18 L8 32 Z" />
+    </svg>
+  );
+}
+
+/** Replaces the button's icon (its first element without text, e.g. Install's download icon). */
+function withIcon(children: ReactNode): ReactNode {
+  if (!Array.isArray(children)) {
+    return children;
+  }
+  const index = children.findIndex((child) => isValidElement(child) && textOf(child).trim() === "");
+  if (index < 0) {
+    return children;
+  }
+  const key = (children[index] as ReactElement).key ?? "moonbeam-icon";
+  const saved = savedIcons[STREAM_ICON_KEY];
+  const next = [...children];
+  next[index] = saved === null ? <PlayIcon key={key} /> : renderIcon(saved, String(key));
+  return next;
+}
+
 function withLabel(children: ReactNode, label: string): ReactNode {
   const labelState = { done: false };
   const replaced = replaceLabel(children, label, labelState);
   return labelState.done ? replaced : <span>{label}</span>;
-}
-
-function iconProps(attributes: Record<string, string>): Record<string, string> {
-  const { class: className, ...rest } = attributes;
-  return className === undefined ? rest : { ...rest, className };
 }
 
 /** Steam's ▼ icon: a small filled triangle (used until Steam's own icon has been seen). */
@@ -449,9 +499,10 @@ function ownSelector(game: Game): ReactNode {
       className={`${appActionButtonClasses.StreamingSelector} ${OWN_SELECTOR_CLASS}`}
       onClick={(event: any) => openLaunchMenu(event, game)}
     >
-      {selectorIcon === null
-        ? <DownTriangle />
-        : <svg {...iconProps(selectorIcon.attributes)} dangerouslySetInnerHTML={{ __html: selectorIcon.content }} />}
+      {/* Centred in the ▼ whatever Steam's CSS does with its content */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
+        {savedIcons[SELECTOR_ICON_KEY] === null ? <DownTriangle /> : renderIcon(savedIcons[SELECTOR_ICON_KEY])}
+      </div>
     </Button>
   );
 }
@@ -502,7 +553,7 @@ function overrideProps(props: any): Override | null {
   // Which PC, when there is more than one to choose from
   const label = getCurrentState().hosts.length > 1 ? `Moonbeam: ${option.host}` : "Moonbeam";
   return {
-    props: { ...props, children: withLabel(props.children, label), disabled: false, onClick: () => launch(game, option) },
+    props: { ...props, children: withIcon(withLabel(props.children, label)), disabled: false, onClick: () => launch(game, option) },
     after
   };
 }
