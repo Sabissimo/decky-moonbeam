@@ -50,6 +50,8 @@ let currentGame: Game | null = null;
 let playBarInstance: { forceUpdate?: () => void; props?: any } | null = null;
 // The open game page (its InnerContainer), where Steam's ▼ is looked for
 let pageRoot: ParentNode | null = null;
+// Steam's button component behind the Play button (also renders Steam's ▼)
+let steamButtonType: any = null;
 // Class of Moonbeam's own ▼, which carries Steam's selector class too (for Steam's styling)
 const OWN_SELECTOR_CLASS = "moonbeam-selector";
 
@@ -349,14 +351,17 @@ function Chevron() {
 
 /** Moonbeam's own ▼, next to Play when Steam shows none (Steam can't stream the game). */
 function ownSelector(game: Game): ReactNode {
+  // Steam's own button component (the one rendering Play) with Steam's ▼ class, so it looks like Steam's ▼
+  const Button = steamButtonType ?? DialogButton;
   return (
-    <DialogButton
+    <Button
       key="moonbeam-selector"
+      noFocusRing
       className={`${appActionButtonClasses.StreamingSelector} ${OWN_SELECTOR_CLASS}`}
       onClick={(event: any) => openLaunchMenu(event, game)}
     >
       <Chevron />
-    </DialogButton>
+    </Button>
   );
 }
 
@@ -456,18 +461,21 @@ function reactFiber(element: Element): any {
 
 interface Found {
   patched: boolean;
+  // The patched component (Steam's button component, for the play button)
+  type: any;
   // Nearest class component above the element (can be re-rendered)
   instance: any;
 }
 
 /** Patches the component that renders an element with the class, walking up from the element. */
 function patchFromElement(element: Element, className: string): Found {
-  const found: Found = { patched: false, instance: null };
+  const found: Found = { patched: false, type: null, instance: null };
   let fiber = reactFiber(element);
   for (let i = 0; fiber && i < MAX_FIBER_STEPS; i++, fiber = fiber.return) {
     const carriesClass = classesOf(fiber.memoizedProps?.className).includes(className);
     if (!found.patched && carriesClass && fiber.tag !== HOST_TAG) {
       found.patched = patchFiberType(fiber);
+      found.type = found.patched ? fiber.elementType : null;
     }
     if (found.patched && fiber.tag === CLASS_COMPONENT_TAG && typeof fiber.stateNode?.forceUpdate === "function") {
       found.instance = fiber.stateNode;
@@ -499,6 +507,9 @@ function discover(root: ParentNode): Discovery {
     result[name] = true;
     const found = patchFromElement(element, className);
     result.patched = result.patched || found.patched;
+    if (name === "playButton" && found.type !== null) {
+      steamButtonType = found.type;
+    }
     if (found.instance !== null) {
       playBarInstance = found.instance;
       result.playBar = true;
