@@ -43,6 +43,8 @@ export interface ScannedHost {
 }
 
 const scanHostsCall = callable<[], ScannedHost[]>("scan_hosts");
+/** Which of Moonlight's PCs answer right now, by name. */
+export const checkHosts = callable<[], Record<string, boolean>>("check_hosts");
 const logCall = callable<[message: string], void>("log");
 
 /** Writes a message to the plugin log on the Deck (~/homebrew/logs/Moonbeam/), when debug logging is on. */

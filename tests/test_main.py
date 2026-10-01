@@ -162,7 +162,8 @@ class DirectFetchTest(unittest.TestCase):
 
         class HttpHandler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                body = f'<root status_code="200"><HttpsPort>{https_port}</HttpsPort></root>'.encode()
+                body = (f'<root status_code="200"><HttpsPort>{https_port}</HttpsPort>'
+                        f'<uniqueid>PC-UUID</uniqueid></root>').encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -225,6 +226,26 @@ class DirectFetchTest(unittest.TestCase):
         finally:
             del decky.DECKY_USER_HOME
             del decky.DECKY_PLUGIN_RUNTIME_DIR
+
+    def test_check_hosts(self):
+        conf_dir = self.tmp / "home" / ".var" / "app" / main.FLATPAK_ID / "config" / main.CONF_SUBPATH.parent
+        conf_dir.mkdir(parents=True)
+        port = self.http.server_address[1]
+        (conf_dir / main.CONF_SUBPATH.name).write_text(
+            "[hosts]\n"
+            f"1\\hostname=PC\n1\\uuid=PC-UUID\n1\\localaddress=127.0.0.1\n1\\localport={port}\n"
+            # Another PC answering at that address now is not the paired one
+            f"2\\hostname=OLD\n2\\uuid=OTHER\n2\\localaddress=127.0.0.1\n2\\localport={port}\n"
+            "3\\hostname=OFF\n3\\uuid=OFF-UUID\n3\\localaddress=127.0.0.1\n3\\localport=9\n"
+            "size=3\n")
+        decky.DECKY_USER_HOME = str(self.tmp / "home")
+        plugin = main.Plugin()
+        plugin.settings_path = self.tmp / "settings" / "settings.json"
+        try:
+            import asyncio
+            self.assertEqual(asyncio.run(plugin.check_hosts()), {"PC": True, "OLD": False, "OFF": False})
+        finally:
+            del decky.DECKY_USER_HOME
 
     def test_unpaired_client_rejected(self):
         stranger_cert, stranger_key = make_cert(self.tmp, "stranger")

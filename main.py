@@ -21,6 +21,8 @@ FLATPAK_ID = "com.moonlight_stream.Moonlight"
 CONF_SUBPATH = Path("Moonlight Game Streaming Project") / "Moonlight.conf"
 LIST_TIMEOUT = 30
 HTTP_TIMEOUT = 5
+# Checking whether a PC is online: short, the PC is on the local network
+ONLINE_TIMEOUT = 1.5
 DEFAULT_HTTP_PORT = 47989
 DEFAULT_HTTPS_PORT = 47984
 # Same placeholder id Moonlight uses, the host identifies clients by certificate
@@ -263,9 +265,9 @@ def fetch_app_list_direct(address: str, port: int, identity: dict[str, str], ser
         conn.close()
 
 
-def get_server_info(address: str, port: int) -> dict[str, str]:
+def get_server_info(address: str, port: int, timeout: float = HTTP_TIMEOUT) -> dict[str, str]:
     """Reads the host's public info (no pairing needed)."""
-    conn = http.client.HTTPConnection(_http_host(address), port, timeout=HTTP_TIMEOUT)
+    conn = http.client.HTTPConnection(_http_host(address), port, timeout=timeout)
     try:
         conn.request("GET", f"/serverinfo?uniqueid={UNIQUE_ID}&uuid={uuid.uuid4().hex}")
         return parse_server_info(conn.getresponse().read().decode(errors="replace"))
@@ -496,6 +498,35 @@ class Plugin:
         settings.update({key: value for key, value in update.items() if key in DEFAULT_SETTINGS})
         self._write_settings(settings)
 
+    def _host_addresses(self, host: Optional[dict[str, Any]], manual_address: str) -> list[dict[str, Any]]:
+        """Addresses to reach a host at: the one entered in the menu, the one found by a scan, Moonlight's."""
+        addresses = [parse_address(manual_address)] if manual_address.strip() else []
+        if host is not None:
+            discovered = self._read_settings()["discovered"].get(host["uuid"])
+            if discovered:
+                addresses.append(parse_address(discovered))
+            addresses += host["addresses"]
+        return addresses
+
+    async def check_hosts(self) -> dict[str, bool]:
+        """Tells which of Moonlight's hosts are online now (they answer as the PC Moonlight paired with)."""
+        settings = self._read_settings()
+
+        async def check(host: dict[str, Any]) -> bool:
+            manual = settings["address"] if host["name"] == settings["host"] else ""
+            for entry in self._host_addresses(host, manual):
+                try:
+                    info = await asyncio.to_thread(get_server_info, entry["address"], entry["port"], ONLINE_TIMEOUT)
+                except Exception:
+                    continue
+                if not host["uuid"] or info["uuid"] == host["uuid"]:
+                    return True
+            return False
+
+        hosts = read_moonlight_hosts()
+        results = await asyncio.gather(*(check(host) for host in hosts))
+        return {host["name"]: online for host, online in zip(hosts, results)}
+
     async def _fetch_direct(self, host_name: str, manual_address: str) -> list[str]:
         text = read_moonlight_conf()
         if text is None:
@@ -506,12 +537,7 @@ class Plugin:
             raise RuntimeError("Moonlight has no pairing certificate yet")
 
         host = next((h for h in parse_moonlight_conf(text) if h["name"] == host_name), None)
-        addresses = [parse_address(manual_address)] if manual_address.strip() else []
-        if host is not None:
-            discovered = self._read_settings()["discovered"].get(host["uuid"])
-            if discovered:
-                addresses.append(parse_address(discovered))
-            addresses += host["addresses"]
+        addresses = self._host_addresses(host, manual_address)
         if not addresses:
             raise RuntimeError("No address known for the PC, enter it in the Moonbeam menu")
 

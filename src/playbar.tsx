@@ -1,8 +1,9 @@
 /*
  * Moonbeam on Steam's game page, in Steam's own play bar.
  *
- * Steam shows its launch selector (the ▼ next to Play) when the game can be streamed from
- * another PC, i.e. when that PC is online. Moonbeam is only offered then: the ▼ opens one
+ * A PC can stream the game when Steam sees it (Steam shows its launch selector, the ▼ next to
+ * Play, and lists the PC) or when the PC itself answers Moonbeam's online check. Without
+ * Steam's ▼ (non-Steam games, Steam not running on the PC), Moonbeam adds its own. The ▼ opens one
  * "Play from" menu with this device, Steam's streaming from each PC and "Moonbeam from <PC>"
  * for each PC whose Moonlight app list has the game. With "Replace Steam's stream", a PC with
  * the game shows only Moonbeam instead of Steam's streaming. Like Steam's own menu, choosing
@@ -19,10 +20,10 @@
  * page, for games that match a host app. Everything else renders unchanged.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Menu, MenuItem, appActionButtonClasses, appDetailsClasses, showContextMenu } from "@decky/ui";
+import { DialogButton, Menu, MenuItem, appActionButtonClasses, appDetailsClasses, showContextMenu } from "@decky/ui";
 import { ReactElement, ReactNode, cloneElement, isValidElement } from "react";
 import { findHostApp, findHostsForGame, normalizeName } from "./match";
-import { getCurrentState, logToBackend, orderedHosts, updateSettings } from "./store";
+import { checkHosts, getCurrentState, logToBackend, orderedHosts, updateSettings } from "./store";
 import { streamGame } from "./steam";
 
 const HOST_TAG = 5;
@@ -33,6 +34,7 @@ const SIMPLE_MEMO_TAG = 15;
 const MAX_FIBER_STEPS = 60;
 const DISCOVERY_INTERVAL_MS = 300;
 const DISCOVERY_TIMEOUT_MS = 10000;
+const ONLINE_CHECK_INTERVAL_MS = 30000;
 
 // ---------------------------------------------------------------------------
 // The game page that is open
@@ -111,23 +113,40 @@ interface StreamOption {
   // Moonlight's PC and its app for the game
   host: string;
   hostApp: string;
-  // Steam's matching PC, null when Steam lists none but shows its selector (single PC)
+  // Steam's matching PC, or null when Steam doesn't list it (found online by Moonbeam itself)
   client: ClientData | null;
 }
 
-/** Moonlight PCs that have the game and that Steam sees online, the preferred PC first. */
+// Moonlight's PCs that answered the last online check, by name
+let onlineHosts: Record<string, boolean> = {};
+
+async function updateOnlineHosts(): Promise<void> {
+  try {
+    const result = await checkHosts();
+    const changed = JSON.stringify(result) !== JSON.stringify(onlineHosts);
+    onlineHosts = result;
+    if (changed) {
+      refreshPlayBar();
+    }
+  } catch (error) {
+    console.error("Moonbeam: online check failed", error);
+  }
+}
+
+/** Steam's PCs for the game, when Steam can stream it (it shows its ▼). */
+function steamClients(game: Game): ClientData[] {
+  return streamingAvailable() ? remoteClients(getOverview(game.appId)) : [];
+}
+
+/** Moonlight PCs that have the game and are online (seen by Steam or answering), the preferred PC first. */
 function streamOptions(game: Game): StreamOption[] {
   const current = getCurrentState();
   const games = findHostsForGame(game.appName, orderedHosts(current));
   if (games.length === 0) {
     return [];
   }
-  const clients = remoteClients(getOverview(game.appId));
+  const clients = steamClients(game);
   const single = current.hosts.length === 1;
-  if (clients.length === 0) {
-    // Steam shows the selector but doesn't say which PC: fine as long as there is only one
-    return single && streamingAvailable() ? [{ ...games[0], client: null }] : [];
-  }
   const options: StreamOption[] = [];
   for (const { host, hostApp } of games) {
     const name = normalizeName(host);
@@ -135,6 +154,9 @@ function streamOptions(game: Game): StreamOption[] {
       (single && clients.length === 1 ? clients[0] : undefined);
     if (client !== undefined) {
       options.push({ host, hostApp, client });
+    } else if (onlineHosts[host] === true || (single && streamingAvailable() && clients.length === 0)) {
+      // Online by its own answer, or Steam shows its ▼ without naming the only PC
+      options.push({ host, hostApp, client: null });
     }
   }
   return options;
@@ -152,11 +174,12 @@ function chosenOption(game: Game, options: StreamOption[]): StreamOption | null 
   if (preferred !== undefined) {
     return preferred;
   }
-  if (settings.replaceSteamStream) {
+  if (settings.replaceSteamStream && streamingAvailable()) {
     // Steam's own choice of a PC with the game means Moonbeam from it
     const selected = selectedRemoteClient(getOverview(game.appId));
     if (selected !== null) {
-      return options.find((option) => option.client === null || option.client.clientid === selected.clientid) ?? null;
+      return options.find((option) => option.client?.clientid === selected.clientid) ??
+        (getCurrentState().hosts.length === 1 ? options.find((option) => option.client === null) : undefined) ?? null;
     }
   }
   return null;
@@ -217,13 +240,14 @@ function menuEntries(game: Game): MenuEntry[] {
     }
   };
 
+  const clients = steamClients(game);
   const entries: MenuEntry[] = [{
     label: "This Steam Deck",
-    checked: chosen === null && remoteClients(overview).every((client) => client.clientid !== selectedId),
+    checked: chosen === null && clients.every((client) => client.clientid !== selectedId),
     select: () => steam(localClientId(overview))
   }];
   const used = new Set<StreamOption>();
-  for (const client of remoteClients(overview)) {
+  for (const client of clients) {
     const option = options.find((candidate) => candidate.client?.clientid === client.clientid);
     if (option === undefined || !settings.replaceSteamStream) {
       entries.push({
@@ -237,7 +261,7 @@ function menuEntries(game: Game): MenuEntry[] {
       entries.push({ label: `Moonbeam from: ${option.host}`, checked: option === chosen, select: () => moonbeam(option) });
     }
   }
-  // A PC Steam doesn't name (single PC, no client data)
+  // PCs Steam doesn't list, online by their own answer
   for (const option of options.filter((candidate) => !used.has(candidate))) {
     entries.push({ label: `Moonbeam from: ${option.host}`, checked: option === chosen, select: () => moonbeam(option) });
   }
@@ -294,8 +318,36 @@ function withLabel(children: ReactNode, label: string): ReactNode {
   return labelState.done ? replaced : <span>{label}</span>;
 }
 
-/** Props Moonbeam renders Steam's element with, or null to leave it alone. */
-function overrideProps(props: any): any | null {
+function Chevron() {
+  return (
+    <svg viewBox="0 0 16 16" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M3 6 L8 11 L13 6" />
+    </svg>
+  );
+}
+
+/** Moonbeam's own ▼, next to Play when Steam shows none (Steam can't stream the game). */
+function ownSelector(game: Game): ReactNode {
+  return (
+    <DialogButton
+      key="moonbeam-selector"
+      className={appActionButtonClasses.StreamingSelector}
+      onClick={(event: any) => openLaunchMenu(event, game)}
+    >
+      <Chevron />
+    </DialogButton>
+  );
+}
+
+interface Override {
+  // Props Moonbeam renders Steam's element with
+  props: any;
+  // Rendered right after the element
+  after?: ReactNode;
+}
+
+/** How Moonbeam changes Steam's element, or null to leave it alone. */
+function overrideProps(props: any): Override | null {
   const game = currentGame;
   if (game === null || props === null || typeof props !== "object") {
     return null;
@@ -314,19 +366,21 @@ function overrideProps(props: any): any | null {
   }
 
   if (isSelector) {
-    return { ...props, onClick: (event: any) => openLaunchMenu(event, game) };
+    return { props: { ...props, onClick: (event: any) => openLaunchMenu(event, game) } };
   }
 
-  if (!streamingAvailable()) {
-    return null;
-  }
+  // Without Steam's ▼, Moonbeam's own one follows the Play button
+  const after = streamingAvailable() ? undefined : ownSelector(game);
   const option = chosenOption(game, options);
   if (option === null) {
-    return null;
+    return after === undefined ? null : { props, after };
   }
   // Which PC, when there is more than one to choose from
   const label = getCurrentState().hosts.length > 1 ? `Moonbeam: ${option.host}` : "Moonbeam";
-  return { ...props, children: withLabel(props.children, label), disabled: false, onClick: () => launch(game, option) };
+  return {
+    props: { ...props, children: withLabel(props.children, label), disabled: false, onClick: () => launch(game, option) },
+    after
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -337,13 +391,14 @@ const patchedTypes = new WeakSet<object>();
 
 function wrapRender(render: (...args: any[]) => any): (...args: any[]) => any {
   return function (this: unknown, props: any, ...rest: any[]) {
-    let nextProps = props;
+    let override: Override | null = null;
     try {
-      nextProps = overrideProps(props) ?? props;
+      override = overrideProps(props);
     } catch (error) {
       console.error("Moonbeam: failed to change Steam's element", error);
     }
-    return render.call(this, nextProps, ...rest);
+    const rendered = render.call(this, override?.props ?? props, ...rest);
+    return override?.after === undefined ? rendered : <>{rendered}{override.after}</>;
   };
 }
 
@@ -457,16 +512,22 @@ export function attachToGamePage(anchor: Element, appId: number, appName: string
   };
   attempt();
 
+  // Which PCs answer, now and while the page is open (the last answers are used meanwhile)
+  updateOnlineHosts().catch(() => undefined);
+  const onlineCheck = setInterval(() => { updateOnlineHosts().catch(() => undefined); }, ONLINE_CHECK_INTERVAL_MS);
+
   const report = setTimeout(() => {
     if (findHostApp(appName, getCurrentState().apps) !== null) {
       logToBackend(`Game page ${appId} (${appName}): play button: ${last?.playButton}, selector: ${last?.selector}, ` +
-        `patched: ${last?.patched}, play bar: ${last?.playBar}, streaming available: ${streamingAvailable()}.`);
+        `patched: ${last?.patched}, play bar: ${last?.playBar}, streaming available: ${streamingAvailable()}, ` +
+        `online PCs: ${JSON.stringify(onlineHosts)}.`);
     }
   }, 4000);
 
   return () => {
     clearTimeout(timer);
     clearTimeout(report);
+    clearInterval(onlineCheck);
     if (currentGame?.appId === appId) {
       currentGame = null;
       playBarInstance = null;

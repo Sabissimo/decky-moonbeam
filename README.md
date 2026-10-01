@@ -21,7 +21,7 @@ Nothing extra runs on the PC. Moonbeam only talks to the streaming host and reus
 - **Moonbeam in Steam's play bar.** Pick it from the ▼ next to Play, and the main button remembers it per game, like Steam's own Stream.
 - **One menu.** The ▼ lists this device, Steam's streaming and Moonbeam for each PC, or Moonbeam instead of Steam's streaming.
 - **Several PCs.** Every PC saved in Moonlight is used; a game offers Moonbeam from each PC that has it, and remembers which one you picked.
-- **Only when the PC is online.** No ▼ from Steam means no PC to stream from, so Moonbeam stays out of the way.
+- **Only when the PC is online.** Seen by Steam, or answering Moonbeam's own check, so non-Steam games and PCs without Steam work too.
 - **Collections** in the library with every game you can stream, from any PC and from each PC.
 - **App lists without opening Moonlight.** Read from Moonlight's config, refreshed from the PC on demand, directly from the host if needed.
 - **Network scan** for Sunshine/Apollo/Vibepollo PCs, showing which are paired.
@@ -33,7 +33,7 @@ Nothing extra runs on the PC. Moonbeam only talks to the streaming host and reus
 - Moonlight from Flatpak (`com.moonlight_stream.Moonlight`, the version in the Discover store).
 - A PC running Sunshine, Apollo or Vibepollo, **paired with Moonlight on the Deck**.
 - Each game you want to stream added as an app on the host, **named like the game in Steam** (see [Adding games](#adding-games)).
-- Steam on the Deck able to see the PC for streaming (Steam's ▼ next to Play appears for games installed there). That's normally the case when Steam runs on the PC on the same network.
+- The PC reachable from the Deck (same network). Steam on the PC is optional: when it runs, Steam's own streaming shows up next to Moonbeam.
 
 ## Installing
 
@@ -55,8 +55,9 @@ Nothing extra runs on the PC. Moonbeam only talks to the streaming host and reus
 Moonbeam shows up on a game's page when:
 
 - the game's name matches an app on one of Moonlight's PCs, and
-- Steam shows its **▼** next to Play, meaning a PC is online and has the game. Without the ▼, Moonbeam changes nothing on the page, and
-- that PC is one Steam lists for the game right now (see [Several PCs](#several-pcs)).
+- that PC is online: Steam lists it for the game (its **▼** next to Play), or the PC itself answers Moonbeam's check (see [Several PCs](#several-pcs)).
+
+When Steam shows no ▼ (a non-Steam shortcut, Steam not running on the PC, or the game not installed in the PC's Steam), Moonbeam adds its own ▼ next to Play, with **This Steam Deck** and **Moonbeam from: ‹PC›**. Without an online PC with the game, Moonbeam changes nothing on the page.
 
 ### The ▼ menu
 
@@ -84,7 +85,7 @@ For example, with GAMING-PC and LAPTOP online and both having the game:
 
 - Every PC saved in Moonlight is used. A game gets Moonbeam from each of them whose app list has it.
 - Steam's PCs and Moonlight's PCs are matched **by name** (ignoring case and punctuation): `GAMING-PC` in Steam's ▼ menu matches `Gaming PC` in Moonlight. Name the host like the computer (the default in Sunshine/Apollo/Vibepollo) and they line up. With only one PC on each side, they are matched whatever their names.
-- A PC is only offered while Steam lists it for the game (online, with the game installed). If the PC chosen for a game is offline, the big button goes back to Steam's action until it is online again.
+- A PC is offered while Steam lists it for the game, or while it answers Moonbeam's online check (asked when a matching game page opens and every 30 seconds while it stays open; a sleeping PC doesn't answer). If the PC chosen for a game is offline, the big button goes back to Steam's action until it is online again.
 - The big button names the PC (**Moonbeam: ‹PC›**) when Moonlight knows more than one.
 
 ## Plugin menu
@@ -95,7 +96,7 @@ For example, with GAMING-PC and LAPTOP online and both having the game:
 | **Refresh app list(s) from PC(s)** | Gets every PC's current app list (see [App lists](#app-lists)). A message tells, for each PC, where the list came from. Use it after adding games on a host. |
 | **PC address (optional)** | IP or name of the (preferred) PC (`192.168.1.10`, `gaming-pc.lan`, `192.168.1.10:47989`). Only needed when the refresh can't reach it at the addresses Moonlight saved. |
 | **Moonbeam collection** | Keeps a *Moonbeam* collection (**Library → Collections**) with every game you can stream, and with several PCs a *Moonbeam: ‹PC›* collection for each. Turning it off removes them. |
-| **Close game on PC when stream ends** | Moonlight asks the host to quit the app when the stream ends (`--quit-after`). For games started with `steam://` links, see [Starting games in Big Picture mode and closing them](#starting-games-in-big-picture-mode-and-closing-them-when-the-stream-ends). |
+| **Close game on PC when stream ends** | Moonlight asks the host to quit the app when the stream ends (`--quit-after`). For games started with `steam://` links, see [Steam games: Big Picture mode and closing them](#steam-games-big-picture-mode-and-closing-them-when-the-stream-ends). |
 | **Replace Steam's stream** | Shows **Moonbeam from: ‹PC›** instead of Steam's **Stream from: ‹PC›** for PCs that have the game (see [The ▼ menu](#the--menu)). |
 | **Debug logging** | Writes detailed log lines and snapshots of game pages to `~/homebrew/logs/Moonbeam/`. Leave it off unless troubleshooting. |
 | **Scan for PCs** | Looks for Sunshine/Apollo/Vibepollo PCs on the network (about 3 seconds) and shows whether each is paired with Moonlight. Unpaired PCs must be paired in Moonlight first. |
@@ -116,14 +117,18 @@ Names are compared ignoring upper/lower case, ™/®/©, accents, apostrophes an
 
 Non-Steam shortcuts in your Deck library work too when their names match.
 
-### Starting games in Big Picture mode and closing them when the stream ends
+### Steam games: Big Picture mode and closing them when the stream ends
 
 Both are **Command Preparations** in the host's web UI: a **Do** command runs before the app starts, an **Undo** command runs when the app is quit. Undo commands run in **reverse order** (last row first), and the global ones run after the app's own.
 
 1. Open the web UI (`https://<PC>:47990`) → **Configuration → General → Command Preparations**.
 2. Add a row for Big Picture:
    - **Do:** `cmd /C start steam://open/bigpicture`
-   - **Undo:** `cmd /C start steam://close/bigpicture`
+   - **Undo:** `cmd /C start steam://close/bigpicture`, or this one to also minimize Steam's window that opens after Big Picture closes:
+     ```
+     powershell -NoProfile -Command "Start-Process 'steam://close/bigpicture'; Start-Sleep 3; Add-Type -Name W -Namespace U -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool ShowWindow(System.IntPtr h, int c);'; Get-Process steam, steamwebhelper -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq 'Steam' } | ForEach-Object { [U.W]::ShowWindow($_.MainWindowHandle, 6) | Out-Null }"
+     ```
+     It waits 3 seconds for Steam's window to appear, then minimizes it. If the window is still open afterwards, raise the `Start-Sleep 3`.
 3. Add a second row, **below** the first, to close the game:
    - **Do:** empty
    - **Undo:**
@@ -142,8 +147,49 @@ About the close command:
 - **Save first.** A force-close loses progress since the last save; many games ignore the polite close.
 - **It also closes non-game Steam apps**, such as Wallpaper Engine. To keep one running, add `-and $_.Name -ne 'wallpaper64'` inside `Where-Object { ... }`, with that program's process name from Task Manager.
 - **A dropped connection doesn't close the game**: undo commands only run when the app is actually quit, so you can reconnect after a Wi-Fi drop.
-- Apps that shouldn't get these commands (such as **Desktop**) can opt out with **Exclude global prep commands** in the app's settings. Or add both rows to each game's app instead of globally.
 - If a game doesn't close, check where its process runs from (Task Manager → *Open file location*).
+
+### Only for Steam games
+
+Global commands run for **every** app, and the host doesn't tell them whether the app is a Steam game. So it's decided per app:
+
+- **Keep them global** and, in each app that isn't a Steam game (**Desktop**, non-Steam games), tick **Exclude global prep commands** (**Applications → Edit**). Usually the fewer apps to touch.
+- Or **remove the global rows** and add both to each Steam game's own **Command Preparations**, in the same order. Better when most apps aren't Steam games.
+
+Forgetting the tick on a non-Steam app mostly costs Big Picture opening over the game; the Steam kill command finds nothing to close there.
+
+### Non-Steam games
+
+Big Picture isn't needed, and usually nothing has to be closed by hand:
+
+- Put the game's `.exe` (or the emulator with the game) in the app's **Command**, not in **Detached Commands**. The host then starts and watches the game itself, and closes it (with whatever it started) when the app is quit, e.g. by **Close game on PC when stream ends**.
+- Tick **Exclude global prep commands**, so the Steam commands don't run (see above).
+- Games started through a launcher (Epic, GOG Galaxy, Ubisoft Connect, EA app, Battle.net) behave like Steam games: the launcher starts the game and exits, and the host can't close the game. Add an **Undo** command to that app that closes the game by its folder:
+  ```
+  powershell -NoProfile -Command "$p = Get-Process | Where-Object { $_.Path -like '*\Epic Games\*' }; $p | ForEach-Object { $_.CloseMainWindow() | Out-Null }; Start-Sleep 5; $p | Where-Object { -not $_.HasExited } | Stop-Process -Force"
+  ```
+  with the game's install folder instead of `*\Epic Games\*` (e.g. `*\GOG Games\*`). Not the launcher's own folder, or the launcher is closed too.
+
+#### Example: an Epic Games link
+
+1. Get the game's link: in the Epic launcher, the game's **⋯ → Manage → Create desktop shortcut**, then open the shortcut's **Properties** on the desktop. The **URL** looks like `com.epicgames.launcher://apps/<id>?action=launch&silent=true`.
+2. In the host's web UI, add an app named like the game in Steam (or like your non-Steam shortcut on the Deck):
+   - **Command:** `cmd /C start "" "com.epicgames.launcher://apps/<id>?action=launch&silent=true"` (the quotes keep `&` from being taken by `cmd`);
+   - tick **Exclude global prep commands**;
+   - **Command Preparations** of the app, one row, **Do** empty, **Undo**:
+     ```
+     powershell -NoProfile -Command "$p = Get-Process | Where-Object { $_.Path -like '*\Epic Games\*' -and $_.Path -notlike '*\Epic Games\Launcher\*' -and $_.Path -notlike '*\Epic Games\Epic Online Services\*' }; $p | ForEach-Object { $_.CloseMainWindow() | Out-Null }; Start-Sleep 5; $p | Where-Object { -not $_.HasExited } | Stop-Process -Force"
+     ```
+     It closes whatever runs from an `Epic Games` folder (where Epic installs games, `C:\Program Files\Epic Games\<Game>` by default) except Epic's launcher and its online services, which live under `Epic Games` too. Games installed elsewhere: use their folder instead. Tick **Elevated** for games running as administrator (anti-cheat).
+3. On the Deck, turn on **Close game on PC when stream ends** in Moonbeam.
+
+Epic's launcher keeps running on the PC, ready for the next game.
+
+| App | Command | Exclude global prep commands | Undo of its own |
+| --- | --- | --- | --- |
+| Steam game | `steam://rungameid/…` | no | none, the global rows cover it |
+| Non-Steam game or emulator | the game's `.exe` | yes | none, the host closes it |
+| Game from a launcher | the launcher's link or command | yes | close by the game's folder |
 
 ## How it works
 
@@ -165,8 +211,9 @@ Moonbeam starts one hidden non-Steam shortcut (`/usr/bin/flatpak`) with the laun
 
 - Pages of games without a matching host app are left completely alone: no lookup, no patch, no re-render.
 - When a matching game's page opens, Moonbeam finds Steam's Play button and ▼ on it by Steam's own class names (`appActionButtonClasses`), and patches the component that renders them, once. The patch only changes those buttons on the open game page for matching games; Steam's own code still renders them, with a different click action and label.
-- Whether the PC is online comes from Steam's play bar itself (`bShowStreamingSelector`, the flag behind the ▼).
-- Which PCs are online for the game comes from Steam's per-game client data (`per_client_data`), matched to Moonlight's PCs by name.
+- Whether Steam can stream the game comes from Steam's play bar itself (`bShowStreamingSelector`, the flag behind the ▼); which PCs, from Steam's per-game client data (`per_client_data`), matched to Moonlight's PCs by name.
+- The backend also asks each of Moonlight's PCs for `/serverinfo` (the same public request Moonlight makes, 1.5 s timeout), at the addresses also used for the app list. A PC counts as online when it answers with the ID Moonlight paired with.
+- Without Steam's ▼, Moonbeam renders its own ▼ (Steam's `DialogButton` with Steam's selector class) right after the Play button.
 - The ▼ opens Moonbeam's own menu instead of Steam's. Choosing this device or a PC sets Steam's choice for the game (`SteamClient.Apps.SetStreamingClientForApp`, shown by `selected_clientid`), exactly like Steam's menu. Choosing Moonbeam also selects that PC in Steam, and remembers Moonbeam for the game in the plugin's settings.
 - Steam's game page is made of MobX observer components whose render can't be patched after their first render, which is why Moonbeam patches the buttons' components instead of the page.
 
@@ -181,13 +228,13 @@ Moonbeam starts one hidden non-Steam shortcut (`/usr/bin/flatpak`) with the laun
 | --- | --- |
 | The menu shows **Backend error** | Moonbeam's backend didn't answer. Press **Retry**; if it keeps failing, check the log in `~/homebrew/logs/Moonbeam/`. |
 | **No paired PC** | Pair the PC in Moonlight (Flatpak), open its app list once, then press **Reload**. |
-| No ▼ next to Play | Steam doesn't see the PC for streaming: it's off, Steam isn't running on it, or the game isn't installed there. Moonbeam only appears together with Steam's ▼. |
+| No ▼ next to Play | Neither Steam nor Moonbeam reaches a PC with the game: it's off or asleep, the game's name doesn't match an app, or the PC's addresses don't work (try **Scan for PCs** or set **PC address**). Moonbeam checks again every 30 seconds while the page is open. |
 | ▼ shows only Steam's menu | The game's name doesn't match a host app, the PC's name in Steam doesn't match its name in Moonlight (with several PCs), or **Replace Steam's stream** is on. Compare names and press **Refresh app list from PC**. |
 | "‹PC›: not reachable, using saved list" | The PC is off or none of its addresses work. Start it, try **Scan for PCs**, or set **PC address**. The message lists each attempt's error. |
 | Host refuses the app list (401/403) | The host doesn't let this Moonlight client list apps. Check the client's permissions in the host's web UI (Apollo/Vibepollo have per-client permissions). |
 | **Scan for PCs** finds nothing | The host must be running on the same network. Some routers and guest Wi-Fi block mDNS; set **PC address** instead. |
 | "Failed to create the Moonlight shortcut" | Restart Steam and try again. |
-| The game keeps running on the PC | See [Closing games](#starting-games-in-big-picture-mode-and-closing-them-when-the-stream-ends). |
+| The game keeps running on the PC | See [Closing games](#steam-games-big-picture-mode-and-closing-them-when-the-stream-ends). |
 | Something else on the game page | Turn on **Debug logging**, open the game page (and the ▼ menu), then send `~/homebrew/logs/Moonbeam/` (the log plus `gamepage-<appid>.txt`) with your report. The snapshots contain the page's text, including friends' names. |
 
 ## Development
