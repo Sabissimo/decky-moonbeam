@@ -1,0 +1,11 @@
+{
+  "name": "Moonbeam",
+  "author": "Sabissimo",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["moonlight", "sunshine", "streaming"],
+    "description": "Stream games from your PC's Sunshine/Apollo/Vibepollo app list with Moonlight, straight from the Steam game page.",
+    "image": "https://opengraph.githubassets.com/1/Sabissimo/decky-moonbeam"
+  }
+}

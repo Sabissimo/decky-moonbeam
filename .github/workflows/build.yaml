@@ -1,0 +1,65 @@
+name: Build
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+    branches: ['main']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build plugin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+
+      - name: Install PNPM
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Backend tests
+        run: pnpm run test
+
+      - name: Build frontend
+        run: pnpm run build
+
+      - name: Package
+        run: |
+          mkdir -p out/Moonbeam
+          cp -r dist main.py plugin.json package.json LICENSE README.md out/Moonbeam/
+          (cd out && zip -qr ../moonbeam.zip Moonbeam)
+
+      # The downloaded artifact is directly installable (it contains the Moonbeam folder)
+      - name: Upload plugin
+        uses: actions/upload-artifact@v7
+        with:
+          name: Moonbeam
+          path: out/
+          if-no-files-found: error
+
+      - name: Nightly release
+        if: github.ref == 'refs/heads/main'
+        uses: andelf/nightly-release@main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name: nightly
+          name: 'Nightly Release'
+          prerelease: false
+          body: Latest Moonbeam build from main.
+          files: ./moonbeam.zip
