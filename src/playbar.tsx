@@ -52,12 +52,8 @@ let playBarInstance: { forceUpdate?: () => void; props?: any } | null = null;
 let pageRoot: ParentNode | null = null;
 // Steam's button component behind the Play button (also renders Steam's ▼)
 let steamButtonType: any = null;
-// Content of Steam's own ▼ (its icon), once seen on any page, for Moonbeam's ▼
-let steamSelectorIcon: ReactNode = null;
 // Class of Moonbeam's own ▼, which carries Steam's selector class too (for Steam's styling)
 const OWN_SELECTOR_CLASS = "moonbeam-selector";
-// On the Play button's row while Moonbeam added Steam's ▼ class to it
-const MARKED_ATTRIBUTE = "data-moonbeam-selector";
 
 function refreshPlayBar(): void {
   try {
@@ -80,25 +76,80 @@ function streamingAvailable(): boolean {
   return playBarInstance?.props?.bShowStreamingSelector === true;
 }
 
+function reactClassName(element: Element): string {
+  const key = Object.keys(element).find((name) => name.startsWith("__reactProps$"));
+  const className = key === undefined ? undefined : (element as any)[key]?.className;
+  return typeof className === "string" ? className : element.className;
+}
+
+// Steam's ▼ icon (svg attributes and content), saved once seen so Moonbeam's ▼ can use it too
+const ICON_STORAGE_KEY = "moonbeam:selectorIcon";
+const ICON_ATTRIBUTES = ["class", "viewBox", "fill", "xmlns", "width", "height", "preserveAspectRatio"];
+interface SelectorIcon {
+  attributes: Record<string, string>;
+  content: string;
+}
+let selectorIcon: SelectorIcon | null = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(ICON_STORAGE_KEY) ?? "null");
+  } catch {
+    return null;
+  }
+})();
+
+function saveSelectorIcon(selector: Element): void {
+  const svg = selector.querySelector("svg");
+  if (svg === null) {
+    return;
+  }
+  const attributes: Record<string, string> = {};
+  for (const name of ICON_ATTRIBUTES) {
+    const value = svg.getAttribute(name);
+    if (value !== null) {
+      attributes[name] = value;
+    }
+  }
+  const icon = { attributes, content: svg.innerHTML };
+  if (JSON.stringify(icon) !== JSON.stringify(selectorIcon)) {
+    selectorIcon = icon;
+    try {
+      localStorage.setItem(ICON_STORAGE_KEY, JSON.stringify(icon));
+    } catch {
+      // Only a nicer icon next time
+    }
+  }
+}
+
+// Whether the play button currently shows Moonbeam
+let moonbeamOnButton = false;
+
 /**
- * Steam marks the Play button's row with a class while it shows its ▼ (its CSS lays out and colours
- * the ▼ by it). Moonbeam's own ▼ gets the same: added to the row while it is there, removed after.
+ * Steam styles the Play button's row by classes: ShowingStreaming while it shows its ▼ (layout and
+ * colours of the ▼) and Green for a playable game (Play, Stream; Install is blue). The row gets
+ * them for Moonbeam too: ShowingStreaming with Moonbeam's own ▼, Green while the button is Moonbeam.
+ * Classes Steam sets itself (in the row's React props) are never removed.
  */
-function markSelectorRow(): void {
-  const rowClass = appActionButtonClasses.ShowStreaming;
+function syncRowClasses(): void {
   const containerClass = appActionButtonClasses.PlayButtonContainer;
-  if (pageRoot === null || !rowClass || !containerClass) {
+  const selectorClass = appActionButtonClasses.StreamingSelector;
+  if (pageRoot === null || !containerClass || !selectorClass) {
     return;
   }
   for (const row of pageRoot.querySelectorAll(`.${CSS.escape(containerClass)}`)) {
-    const hasOwn = row.querySelector(`.${OWN_SELECTOR_CLASS}`) !== null;
-    const hasSteams = row.querySelector(`.${CSS.escape(appActionButtonClasses.StreamingSelector)}:not(.${OWN_SELECTOR_CLASS})`) !== null;
-    if (hasOwn) {
-      row.classList.add(rowClass);
-    } else if (!hasSteams && row.classList.contains(rowClass) && row.hasAttribute(MARKED_ATTRIBUTE)) {
-      row.classList.remove(rowClass);
+    const steamClasses = classesOf(reactClassName(row));
+    const steamSelector = row.querySelector(`.${CSS.escape(selectorClass)}:not(.${OWN_SELECTOR_CLASS})`);
+    if (steamSelector !== null) {
+      saveSelectorIcon(steamSelector);
     }
-    row.toggleAttribute(MARKED_ATTRIBUTE, hasOwn);
+    const wanted: Array<[string, boolean]> = [
+      [appActionButtonClasses.ShowingStreaming, row.querySelector(`.${OWN_SELECTOR_CLASS}`) !== null],
+      [appActionButtonClasses.Green, moonbeamOnButton]
+    ];
+    for (const [className, ours] of wanted) {
+      if (className) {
+        row.classList.toggle(className, ours || steamClasses.includes(className));
+      }
+    }
   }
 }
 
@@ -111,7 +162,7 @@ function recheckSteamSelector(renderedWith: boolean): void {
     if (streamingAvailable() !== renderedWith) {
       refreshPlayBar();
     }
-    markSelectorRow();
+    syncRowClasses();
   }, 0);
 }
 
@@ -182,7 +233,7 @@ async function updateOnlineHosts(): Promise<void> {
       refreshPlayBar();
     }
     // Moonbeam's ▼ may have gone (PC offline) without the play button changing
-    setTimeout(markSelectorRow, 0);
+    setTimeout(syncRowClasses, 0);
   } catch (error) {
     console.error("Moonbeam: online check failed", error);
   }
@@ -373,6 +424,11 @@ function withLabel(children: ReactNode, label: string): ReactNode {
   return labelState.done ? replaced : <span>{label}</span>;
 }
 
+function iconProps(attributes: Record<string, string>): Record<string, string> {
+  const { class: className, ...rest } = attributes;
+  return className === undefined ? rest : { ...rest, className };
+}
+
 /** Steam's ▼ icon: a small filled triangle (used until Steam's own icon has been seen). */
 function DownTriangle() {
   return (
@@ -393,7 +449,9 @@ function ownSelector(game: Game): ReactNode {
       className={`${appActionButtonClasses.StreamingSelector} ${OWN_SELECTOR_CLASS}`}
       onClick={(event: any) => openLaunchMenu(event, game)}
     >
-      {steamSelectorIcon ?? <DownTriangle />}
+      {selectorIcon === null
+        ? <DownTriangle />
+        : <svg {...iconProps(selectorIcon.attributes)} dangerouslySetInnerHTML={{ __html: selectorIcon.content }} />}
     </Button>
   );
 }
@@ -421,13 +479,14 @@ function overrideProps(props: any): Override | null {
 
   const options = streamOptions(game);
   if (options.length === 0) {
+    if (isPlayButton && moonbeamOnButton) {
+      moonbeamOnButton = false;
+      setTimeout(syncRowClasses, 0);
+    }
     return null;
   }
 
   if (isSelector) {
-    if (!classes.includes(OWN_SELECTOR_CLASS) && props.children != null) {
-      steamSelectorIcon = props.children;
-    }
     return { props: { ...props, onClick: (event: any) => openLaunchMenu(event, game) } };
   }
 
@@ -436,6 +495,7 @@ function overrideProps(props: any): Override | null {
   recheckSteamSelector(steamSelector);
   const after = steamSelector ? undefined : ownSelector(game);
   const option = chosenOption(game, options);
+  moonbeamOnButton = option !== null;
   if (option === null) {
     return after === undefined ? null : { props, after };
   }
@@ -604,6 +664,7 @@ export function attachToGamePage(anchor: Element, appId: number, appName: string
       currentGame = null;
       playBarInstance = null;
       pageRoot = null;
+      moonbeamOnButton = false;
     }
   };
 }
