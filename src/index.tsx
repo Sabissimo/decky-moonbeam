@@ -284,26 +284,12 @@ function Content() {
   );
 }
 
-// Collections are also checked regularly, so a deleted one comes back
-const COLLECTION_CHECK_INTERVAL_MS = 30000;
-
-/** Keeps the Moonbeam collections in sync when the app lists or the related settings change, and regularly. */
+/** Keeps the Moonbeam collection in sync whenever the app list or the related settings change. */
 function watchCollection(): () => void {
   let lastKey: string | null = null;
-  let current: State | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const sync = (): void => {
-    if (current === null || !current.loaded) {
-      return;
-    }
-    const { settings, hosts } = current;
-    syncCollections(hosts, settings.collection, settings.shortcutAppId)
-      .catch((e) => console.error("Moonbeam: failed to sync collections", e));
-  };
-
   const onChange = (state: State): void => {
-    current = state;
     const { settings, hosts, loaded } = state;
     const key = JSON.stringify([settings.collection, settings.shortcutAppId, hosts.map((host) => [host.name, host.apps])]);
     if (!loaded || key === lastKey) {
@@ -312,18 +298,16 @@ function watchCollection(): () => void {
 
     lastKey = key;
     clearTimeout(timer);
-    timer = setTimeout(sync, 1000);
+    timer = setTimeout(() => {
+      syncCollections(hosts, settings.collection, settings.shortcutAppId)
+        .then((count) => console.log(`Moonbeam: collection has ${count} games`))
+        .catch((e) => console.error("Moonbeam: failed to sync collection", e));
+    }, 1000);
   };
 
   const unsubscribe = subscribe(onChange);
-  const check = setInterval(() => {
-    if (current?.settings.collection) {
-      sync();
-    }
-  }, COLLECTION_CHECK_INTERVAL_MS);
   return () => {
     clearTimeout(timer);
-    clearInterval(check);
     unsubscribe();
   };
 }

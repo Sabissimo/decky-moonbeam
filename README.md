@@ -96,7 +96,7 @@ For example, with GAMING-PC and LAPTOP online and both having the game:
 | **PC / Preferred PC** | Lists the PCs saved in Moonlight, with the number of apps each knows. With several PCs, the **PC address** below belongs to the preferred one. |
 | **Refresh app list(s) from PC(s)** | Gets every PC's current app list (see [App lists](#app-lists)). A message tells, for each PC, where the list came from. Use it after adding games on a host. |
 | **PC address (optional)** | IP or name of the (preferred) PC (`192.168.1.10`, `gaming-pc.lan`, `192.168.1.10:47989`). Only needed when the refresh can't reach it at the addresses Moonlight saved. |
-| **Moonbeam collection** | Keeps a *Moonbeam* collection (**Library → Collections**) with every game you can stream, and with several PCs a *Moonbeam: ‹PC›* collection for each. A deleted collection comes back within 30 seconds; turning the option off removes them for good. |
+| **Moonbeam collection** | Keeps a *Moonbeam* collection (**Library → Collections**) with every game you can stream, and with several PCs a *Moonbeam: ‹PC›* collection for each. Turning it off removes them. |
 | **Close game on PC when stream ends** | Moonlight asks the host to quit the app when the stream ends (`--quit-after`). For games started with `steam://` links, see [Steam games: Big Picture mode and closing them](#steam-games-big-picture-mode-and-closing-them-when-the-stream-ends). |
 | **Replace Steam's stream** | Shows **Moonbeam from: ‹PC›** instead of Steam's **Stream from: ‹PC›** for PCs that have the game (see [The ▼ menu](#the--menu)). |
 | **Debug logging** | Writes detailed log lines and snapshots of game pages to `~/homebrew/logs/Moonbeam/`. Leave it off unless troubleshooting. |
